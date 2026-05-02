@@ -15,6 +15,15 @@ import pandas as pd
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.chart.label import DataLabelList
+from openpyxl.chart.marker import Marker
+from openpyxl.chart.text import RichText
+from openpyxl.drawing.text import (
+    CharacterProperties,
+    Font as DrawFont,
+    Paragraph,
+    ParagraphProperties,
+    RichTextProperties,
+)
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
@@ -231,14 +240,53 @@ def write_table(
     return end_row, end_col
 
 
-def style_chart(chart) -> None:
-    chart.height = 8
-    chart.width = 17
+def chart_text(color: str = NEUTRAL, size_pt: int = 9, bold: bool = False) -> RichText:
+    cp = CharacterProperties(
+        sz=size_pt * 100,
+        b=bold,
+        solidFill=color,
+        latin=DrawFont(typeface=FONT),
+    )
+    return RichText(
+        bodyPr=RichTextProperties(),
+        p=[Paragraph(pPr=ParagraphProperties(defRPr=cp), endParaRPr=cp, r=[])],
+    )
+
+
+def style_chart(
+    chart,
+    *,
+    title: str | None = None,
+    value_format: str = '#,##0,,"M"',
+    show_value_labels: bool = False,
+) -> None:
+    chart.height = 9
+    chart.width = 18
     chart.legend = None
-    if chart.x_axis is not None:
-        chart.x_axis.majorGridlines = None
+
+    if title:
+        chart.title = title
+
+    for axis in (chart.x_axis, chart.y_axis):
+        if axis is None:
+            continue
+        axis.delete = False
+        axis.majorGridlines = None
+        axis.txPr = chart_text(NEUTRAL, 9)
+
+    # In openpyxl, chart.y_axis is always the ValueAxis (regardless of bar orientation).
     if chart.y_axis is not None:
-        chart.y_axis.majorGridlines = None
+        chart.y_axis.number_format = value_format
+
+    if show_value_labels:
+        chart.dLbls = DataLabelList(
+            showVal=True,
+            showCatName=False,
+            showSerName=False,
+            showLegendKey=False,
+        )
+        chart.dLbls.numFmt = value_format
+        chart.dLbls.txPr = chart_text(NEUTRAL, 8)
 
 
 def build_analysis(ws: Worksheet, df: pd.DataFrame) -> None:
@@ -268,7 +316,6 @@ def build_analysis(ws: Worksheet, df: pd.DataFrame) -> None:
     )
 
     line = LineChart()
-    line.title = None
     data_ref = Reference(ws, min_col=end_col, min_row=8, max_row=end_row)
     cat_ref = Reference(ws, min_col=2, min_row=9, max_row=end_row)
     line.add_data(data_ref, titles_from_data=True)
@@ -276,7 +323,11 @@ def build_analysis(ws: Worksheet, df: pd.DataFrame) -> None:
     series = line.series[0]
     series.graphicalProperties.line.solidFill = RED
     series.graphicalProperties.line.width = 18000
-    style_chart(line)
+    series.smooth = False
+    series.marker = Marker(symbol="circle", size=6)
+    series.marker.graphicalProperties.solidFill = RED
+    series.marker.graphicalProperties.line.solidFill = RED
+    style_chart(line, title="월별 매출 (단위: 백만원)")
     ws.add_chart(line, "G5")
 
     # 2) 지역별 매출
@@ -296,14 +347,13 @@ def build_analysis(ws: Worksheet, df: pd.DataFrame) -> None:
     bar = BarChart()
     bar.type = "bar"
     bar.style = 2
-    bar.title = None
     data_ref = Reference(ws, min_col=region_end_col, min_row=base + 3, max_row=region_end_row)
     cat_ref = Reference(ws, min_col=2, min_row=base + 4, max_row=region_end_row)
     bar.add_data(data_ref, titles_from_data=True)
     bar.set_categories(cat_ref)
     bar.series[0].graphicalProperties.solidFill = RED
     bar.series[0].graphicalProperties.line.solidFill = RED
-    style_chart(bar)
+    style_chart(bar, title="지역별 매출 (단위: 백만원)", show_value_labels=True)
     ws.add_chart(bar, f"G{base}")
 
     # 3) 카테고리별 매출
